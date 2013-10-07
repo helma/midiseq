@@ -1,71 +1,102 @@
 require "micromidi"
 require "topaz"
 
-@@bpm = 132
-@input = UniMIDI::Input.first.open
-
-class Song
-
-  def initialize score
-    @counter = 0
-    @score = []
-    score.each do |row|
-      row.first.times do
-        @score << row.last
-      end
-    end
+class Device
+  def initialize nr
+    @midi = MIDI.using(UniMIDI::Output.use(nr))
   end
-
-  def step
-    if @score[@counter/8]
-      @score[@counter/8].each do |seq|
-        seq.step
-      end
-    end
-    @counter += 1
-
+  def play note, bpm
+    @midi.channel note.instrument.channel
+    @midi.velocity note.vel
+    @midi.play note.note, note.dur*60.0/bpm/4
   end
+end
 
+class Instrument
+  attr_accessor :device, :channel
+  def initialize dev, chan
+    @device = dev
+    @channel = chan
+  end
+end
+
+class Note
+  attr_accessor :instrument, :note, :vel, :dur
+  def initialize instrument, note, vel, dur
+    @instrument = instrument
+    @note = note
+    @vel = vel
+    @dur = dur
+  end
 end
 
 class Loop
 
-  def initialize device, channel, notes, pattern
-    @pattern_idx = 0
-    @notes_idx = 0
-    @midi = MIDI.using(UniMIDI::Output.use(device))
-    @midi.channel channel
-    @t4 = 60.0/@@bpm
-    @t16 = @t4/4
+  attr_accessor :instrument
+  
+  def initialize instrument, notes="C3", pattern=[1,0,0,0], velocities=100, durations=1
+    @instrument = instrument
     @pattern = pattern.collect{|s| s.to_i > 0 ? true : false }
     @notes = [notes].flatten
+    @velocities = [velocities].flatten
+    @durations = [durations].flatten
+  end
+
+  def note counter
+    ni = counter % @notes.length
+    pi = counter % @pattern.length
+    vi = counter % @velocities.length
+    di = counter % @durations.length
+    @pattern[pi] ? Note.new(@instrument, @notes[ni], @velocities[vi], @durations[di]) : nil
+  end
+
+end
+
+class Song < Topaz::Tempo
+
+  def initialize bpm, score
+    @counter = 0
+    @loop_start = 0
+    @score = []
+    @instruments = []
+    @devices = [0,1].collect{|i| Device.new i}
+    score.each do |row|
+      (row.first*16).times do
+        @score << row.last
+      end
+    end
+    @loop_end = @score.size
+    @bpm = bpm
+    t=Time.now
+    super bpm, :interval => 16 do
+      Thread.new { self.step }
+      diff = Time.now-t - 60.0/@bpm/4.0
+      puts @counter, diff if diff.abs > 0.001 
+      #Thread.new { puts @counter, diff if diff.abs > 0.01 }
+      t=Time.now
+    end
+  end
+
+  def loop start, length
+    @loop_start = start*4
+    @loop_end = @loop_start + length*4
+    @counter = @loop_start
+    @loop = true
   end
 
   def step
-    @pattern_idx = 0 if @pattern_idx >= @pattern.size
-    @notes_idx = 0 if @notes_idx >= @notes.size
-    @midi.play @notes[@notes_idx], @t16 if @pattern[@pattern_idx]
-    @pattern_idx+=1
-    @notes_idx+=1
+    @counter = @loop_start if @loop and @counter >= @loop_end
+    @score[@counter].each do |l|
+      Thread.new do
+        note = l.note(@counter)
+        @devices[note.instrument.device].play note, @bpm if note
+      end
+    end
+    @counter += 1
+    self.stop if @counter >= @score.length
   end
 
 end
-
-bass = Loop.new 0, 15, ["C2","G3","D3","C4"], [1,1,0,1,1,0]
-kick = Loop.new 1, 9, "C2", [1,0,0,0]
-
-score = [
-  [8, [kick]],
-  [16, [kick,bass]],
-  [8, [bass]]
-]
-
-song = Song.new score
-@tempo = Topaz::Tempo.new(@@bpm, :interval => 16) do
-  song.step
-end
-@tempo.start#(:background => true)
-
 
 #TODO: note offs
 #
