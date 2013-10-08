@@ -67,12 +67,17 @@ class Song < Topaz::Tempo
     end
     @loop_end = @score.size
     @bpm = bpm
+
+    at_exit do
+      self.stop
+      @devices.each {|d| d.all_notes_off; d.close }
+    end
+
     t=Time.now
     super bpm, :interval => 16 do
       Thread.new { self.step }
       diff = Time.now-t - 60.0/@bpm/4.0
       puts @counter, diff if diff.abs > 0.001 
-      #Thread.new { puts @counter, diff if diff.abs > 0.01 }
       t=Time.now
     end
   end
@@ -96,21 +101,30 @@ class Song < Topaz::Tempo
     self.stop if @counter >= @score.length
   end
 
-end
-
-#TODO: note offs
-#
-
+  def record instrument
 =begin
-input = UniMIDI::Input.first
-input.open do |input|
+    @devices(instrument.device).open do |input|
+      puts "recording #{instrument.inspect}"
+      loop do
+        m = input.gets
+        puts(m)
+      end
 
-  puts "send some MIDI to your input now..."
-
-  loop do
-    m = input.gets
-    puts(m)
+    end
+=end
+    seq = []
+    recorder = MIDIEye::Listener.new(input)
+    recorder.listen_for(:class => [MIDIMessage::NoteOn, MIDIMessage::NoteOff]) do |event|
+      if event.class == MIDIMessage::NoteOn
+        seq[@counter] = Note.new instrument, event[:message].note, event[:message].velocity, 0
+      elsif event.class == MIDIMessage::NoteOff
+        dur = @counter-seq.length-1
+        seq.last.duration = dur
+      end
+    end
+    recorder.run(:background => true)
+    #transpose.join # join the background thread later
   end
 
 end
-=end
+

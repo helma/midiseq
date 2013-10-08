@@ -1,11 +1,5 @@
 require_relative "seq.rb"
 
-at_exit do
-  nibbler = Nibbler.new
-  puts nibbler.parse("00 B0 7B 00").inspect
-  #puts nibbler.parse("B07B00").inspect
-end
-
 @input = UniMIDI::Input.first.open
 
 mbase = Instrument.new 1,9
@@ -30,6 +24,10 @@ score = [
 ]
 #=end
 #score = [ [32,[kick,snr,hh ]]]
+score = {
+  0 => kick,
+  8 => hh,
+  16 => 
 
 song = Song.new 132, score
 song.loop 8, 8
